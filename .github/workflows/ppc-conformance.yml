@@ -1,0 +1,53 @@
+name: PPC CI/CD conformance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['tests/**', '.github/workflows/ppc-conformance.yml']
+
+jobs:
+  conformance:
+    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+    env:
+      POSTMAN_API_BASE_URL: ${{ vars.POSTMAN_API_BASE_URL }}
+      POSTMAN_GATEWAY_BASE_URL: ${{ vars.POSTMAN_GATEWAY_BASE_URL }}
+      POSTMAN_IAPUB_BASE_URL: ${{ vars.POSTMAN_IAPUB_BASE_URL }}
+      COLLECTION_UID: ${{ vars.COLLECTION_UID }}
+      ENVIRONMENT_UID: ${{ vars.ENVIRONMENT_UID }}
+      POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Postman CLI
+        run: |
+          set -eu
+          case "$(uname -s)/$(uname -m)" in
+            Linux/x86_64)  asset=linux64 ;;
+            Linux/aarch64) asset=linux_arm64 ;;
+            Darwin/arm64)  asset=osx_arm64 ;;
+            Darwin/x86_64) asset=osx64 ;;
+            *) echo "::error::unsupported runner $(uname -s)/$(uname -m)"; exit 1 ;;
+          esac
+          dest="${RUNNER_TEMP:-/tmp}/postman-cli"
+          rm -rf "$dest" && mkdir -p "$dest"
+          curl -fsSL "https://dl-cli.pstmn.io/download/latest/$asset" -o "$dest/pm.tar.gz"
+          tar -xzf "$dest/pm.tar.gz" -C "$dest" && rm -f "$dest/pm.tar.gz"
+          ln -sf "$dest/postman-cli" "$dest/postman"
+          echo "$dest" >> "$GITHUB_PATH"
+          "$dest/postman" --version
+
+      - name: Login
+        run: postman login --with-api-key "$POSTMAN_API_KEY"
+
+      - name: Run conformance suite
+        run: bash tests/ppc-ci-suite.sh
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppc-conformance-results
+          path: ppc-ci-results.md
+          if-no-files-found: warn
