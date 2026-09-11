@@ -10,6 +10,10 @@ COLL=${COLLECTION_UID:?}
 ENVU=${ENVIRONMENT_UID:-}
 RAW_KEY=${POSTMAN_API_KEY:?}
 KEY=$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')
+# The CLI trims POSTMAN_API_KEY in postman-entities/util.js but reads it raw in
+# util.js and run-upload/index.js, so a newline-bearing secret fails with
+# `Invalid character in header content ["X-Api-Key"]`. Re-export it clean.
+export POSTMAN_API_KEY="$KEY"
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 PROXY_PORT=8899; CANARY_PORT=8898
