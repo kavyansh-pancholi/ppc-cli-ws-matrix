@@ -1,0 +1,68 @@
+name: Postman CLI API tests (PPC)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      collection:
+        description: "Collection UID (blank = repo variable COLLECTION_UID)"
+        required: false
+      environment:
+        description: "Environment UID (blank = repo variable ENVIRONMENT_UID)"
+        required: false
+
+jobs:
+  api-tests:
+    # PPC clusters resolve to private 10.x addresses, so this must be a runner
+    # inside the network. Override with the RUNNER_LABEL repo variable.
+    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+
+    env:
+      POSTMAN_API_BASE_URL: ${{ vars.POSTMAN_API_BASE_URL }}
+      POSTMAN_GATEWAY_BASE_URL: ${{ vars.POSTMAN_GATEWAY_BASE_URL }}
+      COLLECTION_UID: ${{ inputs.collection || vars.COLLECTION_UID }}
+      ENVIRONMENT_UID: ${{ inputs.environment || vars.ENVIRONMENT_UID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight (config + cluster reachability)
+        run: |
+          set -u
+          : "${POSTMAN_API_BASE_URL:?set the POSTMAN_API_BASE_URL repo variable}"
+          : "${COLLECTION_UID:?set the COLLECTION_UID repo variable}"
+          echo "api base : $POSTMAN_API_BASE_URL"
+          echo "gateway  : ${POSTMAN_GATEWAY_BASE_URL:-<unset>}"
+          code=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "$POSTMAN_API_BASE_URL/me") || {
+            echo "::error::Cannot reach $POSTMAN_API_BASE_URL - this runner is not inside the PPC network."
+            exit 1
+          }
+          echo "reachable: HTTP $code (401 here is fine, it means DNS+TLS work)"
+
+      - name: Install Postman CLI
+        run: |
+          curl -fsSL https://dl-cli.pstmn.io/download/latest/linux -o postman-cli.tar.gz
+          tar -zxf postman-cli.tar.gz
+          sudo mv postman-cli /usr/bin/postman
+          rm postman-cli.tar.gz
+          postman --version
+
+      - name: Login to Postman CLI
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman login --with-api-key "$POSTMAN_API_KEY"
+
+      - name: Run collection
+        run: |
+          postman collection run "$COLLECTION_UID" \
+            ${ENVIRONMENT_UID:+-e "$ENVIRONMENT_UID"} \
+            -r cli,junit --reporter-junit-export results.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-results
+          path: results.xml
+          if-no-files-found: warn
