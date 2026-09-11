@@ -18,9 +18,12 @@ jobs:
           echo "kernel    : $(uname -s 2>/dev/null || echo windows)"
           echo "public IP : $(curl -s -m 20 https://api.ipify.org || echo unknown)"
           for h in api.dev01.postmanlabs.com gateway.dev01.postmanlabs.com; do
-            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "https://$h/me" 2>/dev/null || echo "000")
-            if [ "$code" = "000" ]; then
-              echo "$h -> UNREACHABLE (timeout / no route)"
+            # capture body-less status and curl's own exit code separately; a
+            # combined $( ... || echo ) concatenates both and breaks the compare
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "https://$h/me" 2>/dev/null)
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "$h -> UNREACHABLE (curl exit $rc, http_code=${code:-none})"
             else
               echo "$h -> HTTP $code (reachable)"
             fi
