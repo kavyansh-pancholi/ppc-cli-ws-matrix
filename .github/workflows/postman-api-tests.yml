@@ -66,7 +66,11 @@ jobs:
       - name: Login to Postman CLI
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
-        run: postman login --with-api-key "$POSTMAN_API_KEY"
+        run: |
+          # The stored secret can carry a trailing newline from copy/paste; an
+          # untrimmed key is persisted into the profile and every later request
+          # dies with `Invalid character in header content ["X-Api-Key"]`.
+          postman login --with-api-key "$(printf '%s' "$POSTMAN_API_KEY" | tr -d '[:space:]')"
 
       - name: Run collection
         run: |
