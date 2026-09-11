@@ -44,11 +44,24 @@ jobs:
 
       - name: Install Postman CLI
         run: |
-          curl -fsSL https://dl-cli.pstmn.io/download/latest/linux -o postman-cli.tar.gz
-          tar -zxf postman-cli.tar.gz
-          sudo mv postman-cli /usr/bin/postman
-          rm postman-cli.tar.gz
-          postman --version
+          set -eu
+          case "$(uname -s)/$(uname -m)" in
+            Linux/x86_64)  asset=linux64 ;;
+            Linux/aarch64) asset=linux_arm64 ;;
+            Darwin/arm64)  asset=osx_arm64 ;;
+            Darwin/x86_64) asset=osx64 ;;
+            *) echo "::error::unsupported runner $(uname -s)/$(uname -m)"; exit 1 ;;
+          esac
+          dest="${RUNNER_TEMP:-/tmp}/postman-cli"
+          rm -rf "$dest" && mkdir -p "$dest"
+          curl -fsSL "https://dl-cli.pstmn.io/download/latest/$asset" -o "$dest/pm.tar.gz"
+          # The binary dynamically loads its sibling lib/ directory, so it must be
+          # run from where it was extracted - do not move it onto PATH by itself.
+          tar -xzf "$dest/pm.tar.gz" -C "$dest"
+          rm -f "$dest/pm.tar.gz"
+          ln -sf "$dest/postman-cli" "$dest/postman"
+          echo "$dest" >> "$GITHUB_PATH"
+          "$dest/postman" --version
 
       - name: Login to Postman CLI
         env:

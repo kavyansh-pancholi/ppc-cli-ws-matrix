@@ -47,3 +47,15 @@ export POSTMAN_IAPUB_BASE_URL=https://iapub.dev01.postmanlabs.com
 postman login --with-api-key "$PMAK"
 postman collection run "$COLLECTION_UID" -e "$ENVIRONMENT_UID"
 ```
+
+## Self-hosted runner
+
+PPC clusters are on private addresses, so the job needs a runner inside the
+network. Register one, label it (e.g. `ppc-dev01`), then point the
+`RUNNER_LABEL` repo variable at that label.
+
+The workflow installs the Postman CLI into `$RUNNER_TEMP` and adds it to
+`$GITHUB_PATH` rather than `sudo mv`-ing the binary to `/usr/bin`. The binary
+loads its sibling `lib/` directory at runtime, so relocating it on its own
+fails with a `pkg/prelude/bootstrap.js` error. This also means no sudo is
+needed, and it works on both Linux and macOS runners.
