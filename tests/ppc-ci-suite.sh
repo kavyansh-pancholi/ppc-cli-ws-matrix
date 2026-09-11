@@ -8,7 +8,8 @@ GW=${POSTMAN_GATEWAY_BASE_URL:?}
 IAPUB=${POSTMAN_IAPUB_BASE_URL:?}
 COLL=${COLLECTION_UID:?}
 ENVU=${ENVIRONMENT_UID:-}
-KEY=${POSTMAN_API_KEY:?}
+RAW_KEY=${POSTMAN_API_KEY:?}
+KEY=$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 PROXY_PORT=8899; CANARY_PORT=8898
@@ -53,6 +54,23 @@ NINE_VARS=(
 )
 PROXY_VARS=(HTTPS_PROXY="http://127.0.0.1:$PROXY_PORT" HTTP_PROXY="http://127.0.0.1:$PROXY_PORT" NO_PROXY="127.0.0.1,localhost")
 
+echo; echo "### 0. Baseline sanity"; echo
+if [ "${#RAW_KEY}" -ne "${#KEY}" ]; then
+  report Baseline "API key free of whitespace" FAIL "secret carries $(( ${#RAW_KEY} - ${#KEY} )) stray whitespace char(s); trimmed for this run"
+else
+  report Baseline "API key free of whitespace" PASS "${#KEY} chars"
+fi
+env "${THREE_VARS[@]}" postman login --with-api-key "$KEY" >/dev/null 2>&1
+env "${THREE_VARS[@]}" postman collection run "$COLL" ${ENVU:+-e "$ENVU"} -x >"$TMP/base.out" 2>&1
+BASE_REQ=$(grep -E '^\|[[:space:]]*requests' "$TMP/base.out" | grep -oE '[0-9]+' | head -1)
+if [ -n "${BASE_REQ:-}" ] && [ "$BASE_REQ" -gt 0 ]; then
+  report Baseline "collection actually executes requests" PASS "$BASE_REQ requests"
+  BASELINE_OK=1
+else
+  report Baseline "collection actually executes requests" FAIL "0 executed: $(grep -viE '^$' "$TMP/base.out" | head -1 | cut -c1-95)"
+  BASELINE_OK=0
+fi
+
 echo; echo "### A. Egress containment"; echo
 : > "$EGRESS"
 env "${THREE_VARS[@]}" "${PROXY_VARS[@]}" postman collection run "$COLL" ${ENVU:+-e "$ENVU"} >"$TMP/a1.out" 2>&1
@@ -82,9 +100,9 @@ BAILREQ=$(grep -oE '\|[[:space:]]*requests[[:space:]]*\|[[:space:]]*[0-9]+' "$TM
 echo; echo "### C. Reporters"; echo
 for r in junit json html; do
   out=$TMP/rep.$r
-  env "${THREE_VARS[@]}" postman collection run "$COLL" ${ENVU:+-e "$ENVU"} -r "$r" --reporter-$r-export "$out" >/dev/null 2>&1
+  env "${THREE_VARS[@]}" postman collection run "$COLL" ${ENVU:+-e "$ENVU"} -r "$r" --reporter-$r-export "$out" >"$TMP/rep.$r.log" 2>&1
   if [ -s "$out" ]; then report Reporter "$r report written" PASS "$(wc -c < "$out" | tr -d ' ') bytes"
-  else report Reporter "$r report written" FAIL "empty/missing"; fi
+  else report Reporter "$r report written" FAIL "$(grep -viE '^$' "$TMP/rep.$r.log" | tail -1 | cut -c1-95)"; fi
 done
 if [ -s "$TMP/rep.junit" ]; then
   python3 -c "import xml.etree.ElementTree as E,sys; t=E.parse('$TMP/rep.junit'); print(t.getroot().tag)" >"$TMP/xml.out" 2>&1 \
