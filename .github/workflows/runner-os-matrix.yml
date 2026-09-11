@@ -1,0 +1,28 @@
+name: Runner OS reachability matrix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Probe PPC cluster reachability
+        shell: bash
+        run: |
+          echo "runner OS : ${{ matrix.os }}"
+          echo "kernel    : $(uname -s 2>/dev/null || echo windows)"
+          echo "public IP : $(curl -s -m 20 https://api.ipify.org || echo unknown)"
+          for h in api.dev01.postmanlabs.com gateway.dev01.postmanlabs.com; do
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "https://$h/me" 2>/dev/null || echo "000")
+            if [ "$code" = "000" ]; then
+              echo "$h -> UNREACHABLE (timeout / no route)"
+            else
+              echo "$h -> HTTP $code (reachable)"
+            fi
+          done
+          echo "--- exit 0 regardless; this job only reports ---"
