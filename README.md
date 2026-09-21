@@ -14,9 +14,9 @@ Variables:
 
 | Name | Example |
 | --- | --- |
-| `POSTMAN_API_BASE_URL` | `https://api.dev01.postmanlabs.com` |
+| `POSTMAN_API_BASE_URL` | `https://api-public.dev01.postmanlabs.com` |
 | `POSTMAN_GATEWAY_BASE_URL` | `https://gateway.dev01.postmanlabs.com` |
-| `POSTMAN_IAPUB_BASE_URL` | `https://iapub.dev01.postmanlabs.com` (login / session validation) |
+| `POSTMAN_IAPUB_BASE_URL` | `https://api-public.dev01.postmanlabs.com` (no public iapub exists; harmless for API-key auth) |
 | `COLLECTION_UID` | `10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36` |
 | `ENVIRONMENT_UID` | `10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da` |
 | `RUNNER_LABEL` | label of a runner inside the network (defaults to `self-hosted`) |
@@ -33,17 +33,34 @@ getGatewayBaseURL: if (process.env.POSTMAN_GATEWAY_BASE_URL) return process.env.
 
 Without them the run hits `api.getpostman.com` and 404s on the PPC collection UID.
 
-## Why a self-hosted runner
+## Runner choice
 
-`gateway.dev01.postmanlabs.com` resolves to `10.130.48.22` (RFC1918). GitHub-hosted
-runners cannot route there, so the job needs a runner inside the network.
+A **GitHub-hosted runner works**, provided the base URLs use the publicly routable
+hosts. Verified from `ubuntu-latest`:
+
+| Host | Public DNS | Reachable from cloud |
+| --- | --- | --- |
+| `api-public.dev01.postmanlabs.com` | 18.225.137.55 | yes (HTTP 401) |
+| `gateway.dev01.postmanlabs.com` | 3.147.134.87 | yes (HTTP 404) |
+| `api.dev01.postmanlabs.com` | 10.130.89.207 | no — RFC1918 |
+| `iapub.dev01.postmanlabs.com` | 10.130.x.x | no — RFC1918 |
+
+`api-public` does not serve gateway routes, so both must be set: pointing the
+gateway at `api-public` fails with `Error: collection could not be loaded`.
+
+Public DNS publishes RFC1918 addresses for the internal hosts, so a misconfigured
+base URL fails as a 20-second timeout rather than a DNS error. The preflight step
+exists to make that obvious.
+
+A self-hosted or in-network containerized runner also works and is required if you
+need `iapub` (browser/PKCE login) or a cluster with no public endpoint.
 
 ## Reproducing locally
 
 ```bash
-export POSTMAN_API_BASE_URL=https://api.dev01.postmanlabs.com
+export POSTMAN_API_BASE_URL=https://api-public.dev01.postmanlabs.com
 export POSTMAN_GATEWAY_BASE_URL=https://gateway.dev01.postmanlabs.com
-export POSTMAN_IAPUB_BASE_URL=https://iapub.dev01.postmanlabs.com
+export POSTMAN_IAPUB_BASE_URL=https://api-public.dev01.postmanlabs.com
 postman login --with-api-key "$PMAK"
 postman collection run "$COLLECTION_UID" -e "$ENVIRONMENT_UID"
 ```

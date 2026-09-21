@@ -14,8 +14,8 @@ on:
 
 jobs:
   api-tests:
-    # PPC clusters resolve to private 10.x addresses, so this must be a runner
-    # inside the network. Override with the RUNNER_LABEL repo variable.
+    # Works on a GitHub-hosted runner when the base URLs use the publicly
+    # routable hosts (api-public + gateway). Override with RUNNER_LABEL.
     runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
 
     env:
