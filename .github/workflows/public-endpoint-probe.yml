@@ -4,33 +4,45 @@ on:
   workflow_dispatch:
 
 jobs:
-  probe:
+  hosts:
+    runs-on: ubuntu-latest
+    name: resolve+probe candidate hosts (public DNS)
+    steps:
+      - name: Probe
+        shell: bash
+        run: |
+          set +e   # never abort; we want every row
+          for h in api.dev01.postmanlabs.com api-public.dev01.postmanlabs.com \
+                   gateway.dev01.postmanlabs.com gateway-public.dev01.postmanlabs.com \
+                   iapub.dev01.postmanlabs.com iapub-public.dev01.postmanlabs.com \
+                   go.dev01.postmanlabs.com app.dev01.postmanlabs.com; do
+            ip=$(getent hosts "$h" 2>/dev/null | awk '{print $1}' | head -1)
+            [ -z "$ip" ] && ip="NO-DNS"
+            code=$(curl -s -m 12 -o /dev/null -w '%{http_code}' "https://$h/me" 2>/dev/null); rc=$?
+            if [ "$rc" -ne 0 ]; then verdict="UNREACHABLE (curl $rc)"; else verdict="HTTP $code"; fi
+            printf '%-46s %-16s %s\n' "$h" "$ip" "$verdict"
+          done
+
+  cli:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: all-api-public
+          - name: A-all-api-public
             api: https://api-public.dev01.postmanlabs.com
             gw:  https://api-public.dev01.postmanlabs.com
             iapub: https://api-public.dev01.postmanlabs.com
-          - name: api-public-plus-internal-gateway
+          - name: B-apipublic-gatewayinternal
             api: https://api-public.dev01.postmanlabs.com
             gw:  https://gateway.dev01.postmanlabs.com
+            iapub: https://api-public.dev01.postmanlabs.com
+          - name: C-all-internal
+            api: https://api.dev01.postmanlabs.com
+            gw:  https://gateway.dev01.postmanlabs.com
             iapub: https://iapub.dev01.postmanlabs.com
-    runs-on: ubuntu-latest        # deliberately GitHub-hosted
+    runs-on: ubuntu-latest
     name: ${{ matrix.name }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Reachability of each host (no auth)
-        shell: bash
-        run: |
-          for u in "${{ matrix.api }}" "${{ matrix.gw }}" "${{ matrix.iapub }}"; do
-            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$u/me" 2>/dev/null); rc=$?
-            if [ "$rc" -ne 0 ]; then echo "$u -> UNREACHABLE (curl exit $rc)"
-            else echo "$u -> HTTP $code (reachable)"; fi
-          done
-
       - name: Install Postman CLI
         shell: bash
         run: |
@@ -40,7 +52,6 @@ jobs:
           tar -xzf "$dest/pm.tar.gz" -C "$dest" && rm -f "$dest/pm.tar.gz"
           ln -sf "$dest/postman-cli" "$dest/postman"
           echo "$dest" >> "$GITHUB_PATH"
-          "$dest/postman" --version
 
       - name: Login + run collection
         shell: bash
@@ -50,8 +61,9 @@ jobs:
           POSTMAN_IAPUB_BASE_URL: ${{ matrix.iapub }}
           RAW_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
+          set +e
           export POSTMAN_API_KEY="$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')"
-          echo "--- login ---"
-          postman login --with-api-key "$POSTMAN_API_KEY" && echo "login: OK" || echo "login: FAILED"
-          echo "--- collection run ---"
-          postman collection run "${{ vars.COLLECTION_UID }}" -x 2>&1 | tail -25
+          echo "=== ${{ matrix.name }} ==="
+          postman login --with-api-key "$POSTMAN_API_KEY" >/dev/null 2>&1 && echo "login: OK" || echo "login: FAILED"
+          postman collection run "${{ vars.COLLECTION_UID }}" -x 2>&1 | tail -20
+          echo "=== end ${{ matrix.name }} ==="
