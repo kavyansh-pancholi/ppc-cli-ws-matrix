@@ -1,0 +1,57 @@
+name: api-public endpoint probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: all-api-public
+            api: https://api-public.dev01.postmanlabs.com
+            gw:  https://api-public.dev01.postmanlabs.com
+            iapub: https://api-public.dev01.postmanlabs.com
+          - name: api-public-plus-internal-gateway
+            api: https://api-public.dev01.postmanlabs.com
+            gw:  https://gateway.dev01.postmanlabs.com
+            iapub: https://iapub.dev01.postmanlabs.com
+    runs-on: ubuntu-latest        # deliberately GitHub-hosted
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reachability of each host (no auth)
+        shell: bash
+        run: |
+          for u in "${{ matrix.api }}" "${{ matrix.gw }}" "${{ matrix.iapub }}"; do
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$u/me" 2>/dev/null); rc=$?
+            if [ "$rc" -ne 0 ]; then echo "$u -> UNREACHABLE (curl exit $rc)"
+            else echo "$u -> HTTP $code (reachable)"; fi
+          done
+
+      - name: Install Postman CLI
+        shell: bash
+        run: |
+          set -eu
+          dest="$RUNNER_TEMP/postman-cli"; mkdir -p "$dest"
+          curl -fsSL https://dl-cli.pstmn.io/download/latest/linux64 -o "$dest/pm.tar.gz"
+          tar -xzf "$dest/pm.tar.gz" -C "$dest" && rm -f "$dest/pm.tar.gz"
+          ln -sf "$dest/postman-cli" "$dest/postman"
+          echo "$dest" >> "$GITHUB_PATH"
+          "$dest/postman" --version
+
+      - name: Login + run collection
+        shell: bash
+        env:
+          POSTMAN_API_BASE_URL: ${{ matrix.api }}
+          POSTMAN_GATEWAY_BASE_URL: ${{ matrix.gw }}
+          POSTMAN_IAPUB_BASE_URL: ${{ matrix.iapub }}
+          RAW_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          export POSTMAN_API_KEY="$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')"
+          echo "--- login ---"
+          postman login --with-api-key "$POSTMAN_API_KEY" && echo "login: OK" || echo "login: FAILED"
+          echo "--- collection run ---"
+          postman collection run "${{ vars.COLLECTION_UID }}" -x 2>&1 | tail -25
