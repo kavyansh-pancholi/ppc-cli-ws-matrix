@@ -1,0 +1,85 @@
+name: CI/CD script with pinned CLI 1.58.0
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pinned:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: A-base-domain-pr-form
+          - name: B-per-service-vars
+    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Postman CLI (pinned via npm)
+        run: npm install -g postman-cli@1.58.0
+
+      - name: Version + PPC capability check
+        shell: bash
+        run: |
+          set +e
+          echo "postman --version : $(postman --version 2>&1)"
+          echo "npm ls -g         : $(npm ls -g postman-cli --depth=0 2>/dev/null | tail -1)"
+          ROOT=$(npm root -g)/postman-cli
+          echo "package root      : $ROOT"
+          echo "--- does this build support POSTMAN_BASE_DOMAIN? ---"
+          if grep -rqs "POSTMAN_BASE_DOMAIN" "$ROOT"; then
+            echo "POSTMAN_BASE_DOMAIN: PRESENT"
+            grep -rls "POSTMAN_BASE_DOMAIN" "$ROOT" 2>/dev/null | sed "s|$ROOT/||" | head -5
+          else
+            echo "POSTMAN_BASE_DOMAIN: ABSENT - this build has no single-domain PPC support"
+          fi
+          echo "--- per-service overrides present? ---"
+          grep -rhos 'process\.env\.POSTMAN_[A-Z0-9_]*BASE_URL' "$ROOT" 2>/dev/null | sed 's/process\.env\.//' | sort -u | head -15
+
+      - name: Run the CI/CD script
+        shell: bash
+        env:
+          RAW_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          COLL: ${{ vars.COLLECTION_UID }}
+          ENVU: ${{ vars.ENVIRONMENT_UID }}
+        run: |
+          set +e
+          KEY="$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')"
+          export POSTMAN_API_KEY="$KEY"
+          D=dev01.postmanlabs.com
+
+          case "${{ matrix.name }}" in
+            A-*) PREFIX="POSTMAN_BASE_DOMAIN=$D" ;;
+            B-*) PREFIX="POSTMAN_API_BASE_URL=https://api-public.$D POSTMAN_GATEWAY_BASE_URL=https://gateway.$D POSTMAN_IAPUB_BASE_URL=https://api-public.$D" ;;
+          esac
+
+          echo "### ${{ matrix.name }}"
+          echo "### prefix: $PREFIX"
+
+          echo "--- login ---"
+          t0=$SECONDS
+          env $PREFIX postman login --with-api-key "$KEY" >/tmp/login.log 2>&1
+          echo "login rc=$? after $((SECONDS-t0))s"
+          tail -3 /tmp/login.log | sed 's/^/    /'
+
+          echo "--- collection run (with -e, junit reporter) ---"
+          t0=$SECONDS
+          env $PREFIX postman collection run "$COLL" -e "$ENVU" \
+            -r cli,junit --reporter-junit-export results-158.xml >/tmp/run.log 2>&1
+          echo "run rc=$? after $((SECONDS-t0))s"
+          grep -E '^\|.*(iterations|requests|assertions)|Error|error|could not|Invalid|Feature flags|Uploading|average response|Report created' /tmp/run.log | sed 's/^/    /' | head -14
+          echo "--- junit artifact ---"
+          [ -s results-158.xml ] && echo "results-158.xml: $(wc -c < results-158.xml) bytes" || echo "results-158.xml: MISSING"
+          echo "### end ${{ matrix.name }}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-158-${{ matrix.name }}
+          path: results-158.xml
+          if-no-files-found: warn
