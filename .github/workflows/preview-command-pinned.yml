@@ -1,7 +1,7 @@
 # The command preview as it appears AFTER postman-eng/postman-app#51208,
 # for the GitHub Actions provider on a PPC deployment — each postman command
 # prefixed inline with POSTMAN_BASE_DOMAIN — with the CLI pinned to 1.58.0.
-name: Preview command (post-PR) on postman-cli 1.58.0
+name: Preview command (post-PR) on postman-cli 1.59.0
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Postman CLI
-        run: sudo npm install -g postman-cli@1.58.0
+        run: sudo npm install -g postman-cli@1.59.0
 
       - name: Confirm version
         run: postman --version
