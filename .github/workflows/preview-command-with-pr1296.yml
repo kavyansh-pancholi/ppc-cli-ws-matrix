@@ -1,0 +1,38 @@
+# The command preview from postman-app#51208, run with the origin resolution
+# that postman-cli#1296 introduces.
+#
+# #1296 changes one thing that matters here: the `api` origin template becomes
+# `api-public.<domain>` instead of `api.<domain>`. Verified from that PR's
+# source (commit a52a93c):
+#     api      https://api-public.dev01.postmanlabs.com
+#     gateway  https://gateway.dev01.postmanlabs.com
+#
+# The released binary is compiled, so it cannot be patched to test this. But
+# POSTMAN_API_BASE_URL takes precedence over the map and resolves to the exact
+# same origin, so supplying it reproduces #1296's resolution identically.
+name: Preview command with PR1296 resolution
+
+on:
+  workflow_dispatch:
+
+jobs:
+  automated-api-tests:
+    runs-on: ubuntu-latest
+    env:
+      # What #1296's origin map yields. Remove once a build containing it ships.
+      POSTMAN_API_BASE_URL: https://api-public.dev01.postmanlabs.com
+    steps:
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.63.0
+
+      - name: Trim the API key
+        env:
+          RAW_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: echo "POSTMAN_API_KEY=$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')" >> "$GITHUB_ENV"
+
+      # ── the preview command, verbatim ──
+      - name: Login to Postman CLI
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
+
+      - name: Run API tests
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
