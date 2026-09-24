@@ -1,0 +1,45 @@
+# Does the snippet work on 1.59.0 with NO PPC targeting at all?
+name: No POSTMAN_BASE_DOMAIN on 1.59.0
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bare:
+    name: bare snippet, nothing set
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.59.0
+      - run: postman --version
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman login --with-api-key $POSTMAN_API_KEY
+      - name: Run API tests
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
+
+  per_service:
+    name: per-service vars, no BASE_DOMAIN
+    runs-on: ubuntu-latest
+    env:
+      POSTMAN_API_BASE_URL: https://api-public.dev01.postmanlabs.com
+      POSTMAN_GATEWAY_BASE_URL: https://gateway.dev01.postmanlabs.com
+      POSTMAN_IAPUB_BASE_URL: https://api-public.dev01.postmanlabs.com
+    steps:
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.59.0
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman login --with-api-key $POSTMAN_API_KEY
+      - name: Run API tests
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
