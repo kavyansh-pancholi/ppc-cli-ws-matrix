@@ -1,0 +1,47 @@
+# Faithful reproduction of what postman-eng/postman-app#51208 would emit for the
+# GitHub Actions provider on a PPC deployment: github-actions is classified as a
+# per-step-shell provider, so withPpcBaseDomain prefixes each postman command
+# inline as `POSTMAN_BASE_DOMAIN=<domain> postman ...`.
+#
+# Install step uses the npm pinned form rather than the tarball.
+name: Automated API tests using Postman CLI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  automated-api-tests-158:
+    name: as-emitted, postman-cli@1.58.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Postman CLI
+        run: npm install -g postman-cli@1.58.0
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
+      - name: Run API tests
+        continue-on-error: true
+        run: |
+          POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
+
+  automated-api-tests-latest:
+    name: as-emitted, postman-cli@latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Postman CLI
+        run: npm install -g postman-cli@latest
+      - name: Report resolved version
+        run: postman --version
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
+      - name: Run API tests
+        continue-on-error: true
+        run: |
+          POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
