@@ -1,0 +1,89 @@
+name: POSTMAN_BASE_DOMAIN (PR 51208 form)
+
+on:
+  workflow_dispatch:
+
+# Reproduces what postman-eng/postman-app#51208 would generate for GitHub
+# Actions: a per-step-shell provider, so the util prefixes each command inline
+# as `POSTMAN_BASE_DOMAIN=<domain> postman ...`.
+jobs:
+  variants:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: V1-pr-form-base-domain-only
+            desc: exactly what PR 51208 emits
+          - name: V2-base-domain-plus-api-public-override
+            desc: PR form plus POSTMAN_API_BASE_URL pointing at api-public
+          - name: V3-control-per-service-vars
+            desc: known-good config currently in the repo variables
+    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    steps:
+      - name: Install Postman CLI
+        shell: bash
+        run: |
+          set -eu
+          dest="$RUNNER_TEMP/postman-cli"; mkdir -p "$dest"
+          curl -fsSL https://dl-cli.pstmn.io/download/latest/linux64 -o "$dest/pm.tar.gz"
+          tar -xzf "$dest/pm.tar.gz" -C "$dest" && rm -f "$dest/pm.tar.gz"
+          ln -sf "$dest/postman-cli" "$dest/postman"
+          echo "$dest" >> "$GITHUB_PATH"
+          "$dest/postman" --version
+
+      - name: Show derived origins
+        shell: bash
+        run: |
+          set +e
+          D=dev01.postmanlabs.com
+          echo "POSTMAN_BASE_DOMAIN=$D derives (per CLI lib/config/ppc-config.js):"
+          for pair in "api:api.$D" "gateway:gateway.$D" "artemis:go.$D" \
+                      "runtimeAgent:runtime-agent.$D" "authn:authx.$D" "iapub:iapub.$D"; do
+            svc=${pair%%:*}; host=${pair#*:}
+            ip=$(getent hosts "$host" 2>/dev/null | awk '{print $1}' | head -1); [ -z "$ip" ] && ip=NO-DNS
+            code=$(curl -s -m 8 -o /dev/null -w '%{http_code}' "https://$host/" 2>/dev/null); rc=$?
+            [ "$rc" -ne 0 ] && v="UNREACHABLE(curl $rc)" || v="HTTP $code"
+            printf '  %-13s %-34s %-16s %s\n' "$svc" "$host" "$ip" "$v"
+          done
+
+      - name: Run variant
+        shell: bash
+        env:
+          RAW_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          COLL: ${{ vars.COLLECTION_UID }}
+        run: |
+          set +e
+          KEY="$(printf '%s' "$RAW_KEY" | tr -d '[:space:]')"
+          export POSTMAN_API_KEY="$KEY"
+          D=dev01.postmanlabs.com
+
+          case "${{ matrix.name }}" in
+            V1-*)
+              PREFIX="POSTMAN_BASE_DOMAIN=$D"
+              ;;
+            V2-*)
+              PREFIX="POSTMAN_BASE_DOMAIN=$D POSTMAN_API_BASE_URL=https://api-public.$D"
+              ;;
+            V3-*)
+              PREFIX="POSTMAN_API_BASE_URL=https://api-public.$D POSTMAN_GATEWAY_BASE_URL=https://gateway.$D POSTMAN_IAPUB_BASE_URL=https://api-public.$D"
+              ;;
+          esac
+
+          echo "### ${{ matrix.name }} — ${{ matrix.desc }}"
+          echo "### prefix: $PREFIX"
+
+          echo "--- login ---"
+          t0=$SECONDS
+          env $PREFIX postman login --with-api-key "$KEY" >/tmp/login.log 2>&1
+          rc=$?
+          echo "login rc=$rc after $((SECONDS-t0))s"
+          tail -3 /tmp/login.log | sed 's/^/    /'
+
+          echo "--- collection run ---"
+          t0=$SECONDS
+          env $PREFIX postman collection run "$COLL" -x >/tmp/run.log 2>&1
+          rc=$?
+          echo "run rc=$rc after $((SECONDS-t0))s"
+          grep -E '^\|.*(iterations|requests|assertions)|Error|error|could not|Invalid|Feature flags|Uploading|average response' /tmp/run.log | sed 's/^/    /' | head -12
+          echo "### end ${{ matrix.name }}"
