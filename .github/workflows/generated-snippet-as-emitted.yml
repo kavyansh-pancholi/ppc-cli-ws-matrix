@@ -1,40 +1,51 @@
-# Faithful reproduction of what postman-eng/postman-app#51208 would emit for the
-# GitHub Actions provider on a PPC deployment: github-actions is classified as a
-# per-step-shell provider, so withPpcBaseDomain prefixes each postman command
-# inline as `POSTMAN_BASE_DOMAIN=<domain> postman ...`.
-#
-# Install step uses the npm pinned form rather than the tarball.
+# Faithful reproduction of what postman-eng/postman-app#51208 emits for the
+# GitHub Actions provider on a PPC deployment: github-actions is a
+# per-step-shell provider, so each postman command is prefixed inline with
+# POSTMAN_BASE_DOMAIN=<domain>.
 name: Automated API tests using Postman CLI
 
 on:
   workflow_dispatch:
 
+env:
+  COLL: "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36"
+  ENVU: "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
+
 jobs:
-  automated-api-tests-158:
-    name: as-emitted, postman-cli@1.58.0
+  # 1. The install line exactly as written. Fails: the runner user cannot
+  #    symlink the man page into /usr/local/share/man/man1.
+  stock-node-158:
+    name: 1. npm -g on stock node, 1.58.0
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Install Postman CLI
+        continue-on-error: true
+        run: npm install -g postman-cli@1.58.0
+      - name: Did it install?
+        run: command -v postman && postman --version || echo "postman NOT on PATH"
+
+  # 2. Same install under sudo.
+  sudo-node-158:
+    name: 2. sudo npm -g, 1.58.0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Postman CLI
+        continue-on-error: true
+        run: sudo npm install -g postman-cli@1.58.0
+      - name: Did it install?
+        run: command -v postman && postman --version || echo "postman NOT on PATH"
+
+  # 3. setup-node relocates node into the writable tool cache, so npm -g works.
+  #    Then run the snippet as emitted, on a build with no BASE_DOMAIN support.
+  toolcache-158:
+    name: 3. setup-node + 1.58.0, snippet as emitted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
       - name: Install Postman CLI
         run: npm install -g postman-cli@1.58.0
-      - name: Login to Postman CLI
-        continue-on-error: true
-        env:
-          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
-        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
-      - name: Run API tests
-        continue-on-error: true
-        run: |
-          POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
-
-  automated-api-tests-latest:
-    name: as-emitted, postman-cli@latest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Postman CLI
-        run: npm install -g postman-cli@latest
-      - name: Report resolved version
+      - name: Version
         run: postman --version
       - name: Login to Postman CLI
         continue-on-error: true
@@ -43,5 +54,24 @@ jobs:
         run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
       - name: Run API tests
         continue-on-error: true
-        run: |
-          POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "$COLL" -e "$ENVU"
+
+  # 4. Same, on whatever npm calls latest — a build that does support it.
+  toolcache-latest:
+    name: 4. setup-node + latest, snippet as emitted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install Postman CLI
+        run: npm install -g postman-cli@latest
+      - name: Version
+        run: postman --version
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
+      - name: Run API tests
+        continue-on-error: true
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "$COLL" -e "$ENVU"
