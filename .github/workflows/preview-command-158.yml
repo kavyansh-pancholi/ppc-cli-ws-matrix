@@ -1,0 +1,27 @@
+# The command preview as it appears AFTER postman-eng/postman-app#51208,
+# for the GitHub Actions provider on a PPC deployment — each postman command
+# prefixed inline with POSTMAN_BASE_DOMAIN — with the CLI pinned to 1.58.0.
+name: Preview command (post-PR) on postman-cli 1.58.0
+
+on:
+  workflow_dispatch:
+
+jobs:
+  automated-api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.58.0
+
+      - name: Confirm version
+        run: postman --version
+
+      - name: Login to Postman CLI
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman login --with-api-key $POSTMAN_API_KEY
+
+      - name: Run API tests
+        run: POSTMAN_BASE_DOMAIN=dev01.postmanlabs.com postman collection run "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36" -e "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
