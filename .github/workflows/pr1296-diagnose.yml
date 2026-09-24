@@ -1,0 +1,62 @@
+name: PR1296 - diagnose patch effectiveness
+
+on:
+  workflow_dispatch:
+
+env:
+  COLL: "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36"
+  DOMAIN: dev01.postmanlabs.com
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.63.0
+
+      - name: How many copies of ppc-config.js, and which bin runs?
+        shell: bash
+        run: |
+          set +e
+          ROOT="$(npm root -g)/postman-cli"
+          echo "resolved postman: $(command -v postman) -> $(readlink -f "$(command -v postman)")"
+          echo "--- every ppc-config.js under the package ---"
+          find "$ROOT" -name 'ppc-config.js' -not -name '*.map' | sed "s|$ROOT/||"
+          echo "--- pm-bin packages present ---"
+          ls "$ROOT/node_modules/@postman" 2>/dev/null | grep pm-bin
+          echo "--- is the entrypoint a pkg snapshot? ---"
+          head -c 200 "$ROOT/bin/postman.js" 2>/dev/null | tr -d '\0' | head -5
+
+      - name: Patch EVERY copy, with a proof sentinel
+        shell: bash
+        run: |
+          set -eu
+          ROOT="$(npm root -g)/postman-cli"
+          n=0
+          while IFS= read -r f; do
+            sudo sed -i 's|api: (domain) => { return `https://api\.\${domain}`; }|api: (domain) => { return `https://api-public.${domain}`; }|' "$f"
+            grep -q 'api-public' "$f" && { echo "patched: ${f#$ROOT/}"; n=$((n+1)); }
+          done < <(find "$ROOT" -name 'ppc-config.js' -not -name '*.map')
+          echo "total patched: $n"
+          [ "$n" -gt 0 ] || { echo "::error::nothing patched"; exit 1; }
+
+      - name: A - BASE_DOMAIN only (relies on the patch)
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          set +e
+          t0=$SECONDS
+          POSTMAN_BASE_DOMAIN=$DOMAIN postman login --with-api-key $POSTMAN_API_KEY
+          echo "A login rc=$? after $((SECONDS-t0))s"
+
+      - name: B - BASE_DOMAIN + explicit POSTMAN_API_BASE_URL (known good)
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          set +e
+          t0=$SECONDS
+          POSTMAN_BASE_DOMAIN=$DOMAIN POSTMAN_API_BASE_URL=https://api-public.$DOMAIN \
+            postman login --with-api-key $POSTMAN_API_KEY
+          echo "B login rc=$? after $((SECONDS-t0))s"
