@@ -1,0 +1,61 @@
+# Does the command preview from postman-app#51208 work once postman-cli#1296
+# lands? #1296's only behavioural change for CI is the api origin template:
+#   api: `https://api.${domain}`  ->  `https://api-public.${domain}`
+# That is applied here to the released binary, so the preview command runs with
+# POSTMAN_BASE_DOMAIN and nothing else — no per-service overrides.
+name: PR1296 - does the preview command work
+
+on:
+  workflow_dispatch:
+
+env:
+  COLL: "10000000000129-8a5b90d2-dc7d-4a9b-be2f-c6a4ee7d2a36"
+  ENVU: "10000000000129-73b5abde-976e-4062-9ae3-5b0969ad66da"
+  DOMAIN: dev01.postmanlabs.com
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unpatched-control
+            patch: 'false'
+          - name: with-pr1296-api-public
+            patch: 'true'
+    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    steps:
+      - name: Install Postman CLI
+        run: sudo npm install -g postman-cli@1.63.0
+
+      - name: Apply PR1296 origin change
+        shell: bash
+        run: |
+          set -eu
+          CFG=$(find "$(npm root -g)/postman-cli" -path '*/lib/config/ppc-config.js' | head -1)
+          echo "ppc-config.js: $CFG"
+          echo "--- api template before ---"
+          grep -o 'api: (domain) => { return `https://[^`]*`; }' "$CFG" || true
+          if [ "${{ matrix.patch }}" = "true" ]; then
+            sudo sed -i 's|api: (domain) => { return `https://api\.\${domain}`; }|api: (domain) => { return `https://api-public.${domain}`; }|' "$CFG"
+            echo "--- api template after ---"
+            grep -o 'api: (domain) => { return `https://[^`]*`; }' "$CFG"
+            grep -q 'api-public' "$CFG" || { echo "::error::patch did not apply"; exit 1; }
+          else
+            echo "(left unpatched)"
+          fi
+
+      - name: Confirm version
+        run: postman --version
+
+      # ---- the command preview from postman-app#51208, verbatim ----
+      - name: Login to Postman CLI
+        continue-on-error: true
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: POSTMAN_BASE_DOMAIN=$DOMAIN postman login --with-api-key $POSTMAN_API_KEY
+
+      - name: Run API tests
+        continue-on-error: true
+        run: POSTMAN_BASE_DOMAIN=$DOMAIN postman collection run "$COLL" -e "$ENVU"
